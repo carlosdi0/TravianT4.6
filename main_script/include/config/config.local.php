@@ -11,6 +11,10 @@ $config->display->includeHiddenMedals = false;
 $config->settings->advanced->voucherEnabled = false;
 $config->custom->paymentWizardBuyGoldEnabled = false;
 $config->custom->serverIsFreeGold = false;
+// A week of Plus and of production boost per purchase. Note AutoExtendModel derives
+// its auto-extension window from these as duration/7, so it now fires a day ahead.
+$config->gold->plusAccountDurationSeconds = 7 * 86400;
+$config->gold->productionBoostDurationSeconds = 7 * 86400;
 $config->game->allowNewTribes = false;
 $config->game->movement_speed_increase = 4;
 $config->game->protection_time = 2 * 86400;

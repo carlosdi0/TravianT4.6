@@ -13,3 +13,6 @@ main_script/copyable/include/error_log.log
 main_script/copyable/include/automation.log
 test-results/
 backups/
+
+# Claude Code scratch space: worktrees carry absolute paths in their .git file
+.claude/

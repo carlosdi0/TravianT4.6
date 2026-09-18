@@ -114,15 +114,48 @@ class StringChecker
             $invalidPages = explode(",", file_get_contents(FILTERING_PATH . "filteredUrls.txt"));
             $cache->set("filteredUrlsCache", $invalidPages, 2 * 86400);
         }
+        $match = self::matchFilteredUrl($string, $invalidPages);
+        if ($match === NULL) {
+            return true;
+        }
+        Notification::notify("Spam detected!",
+            "Player " . Session::getInstance()->getName() . " is trying to spam domain $match");
+        return false;
+    }
+
+    /**
+     * A domain is matched either whole, or split in two so that "spam" plus
+     * "com" is caught as well as "spam.com". Empty entries are skipped: an
+     * empty or comma-padded filter file explodes into "" entries, and both
+     * strpos($string, "") and a missing TLD half would otherwise match every
+     * string and reject every name and message on the server.
+     */
+    public static function matchFilteredUrl($string, array $invalidPages)
+    {
+        if ((string)$string === '') {
+            return NULL;
+        }
         foreach ($invalidPages as $link) {
+            $link = trim((string)$link);
+            if ($link === '') {
+                continue;
+            }
+            if (strpos($string, $link) !== FALSE) {
+                return $link;
+            }
             $split = explode(".", $link);
-            if (!empty($string) && strpos($string, $link) !== FALSE || (strpos($string, $split[0]) !== FALSE && (strpos($string,
-                            $split[1]) !== FALSE || strpos($string, '.' . $split[1]) !== FALSE))) {
-                Notification::notify("Spam detected!",
-                    "Player " . Session::getInstance()->getName() . " is trying to spam domain $link");
-                return false;
+            if (count($split) < 2) {
+                continue;
+            }
+            $domain = $split[0];
+            $tld = $split[1];
+            if ($domain === '' || $tld === '') {
+                continue;
+            }
+            if (strpos($string, $domain) !== FALSE && strpos($string, $tld) !== FALSE) {
+                return $link;
             }
         }
-        return true;
+        return NULL;
     }
 }

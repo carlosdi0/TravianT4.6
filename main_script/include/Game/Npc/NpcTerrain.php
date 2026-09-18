@@ -20,9 +20,14 @@ namespace Game\Npc;
  *     settles on what the map says is here.
  *
  *   - ONLY THE TOP TIER HUNTS CROPPERS. A cropper is the one piece of terrain
- *     worth planning around, and a top account plans. Everyone else takes what
- *     is near, which is what keeps the croppers in the neighbourhood available
- *     for the player for the first weeks.
+ *     worth planning around, and a top account plans.
+ *
+ *   - AND EVERYONE ELSE STAYS OFF THEM. Not hunting is not enough: a small map
+ *     has a handful of croppers, and seeding walks the free valleys closest
+ *     first, so "take whatever is near" handed fifteen-croppers to the cows.
+ *     A non-hunter now ranks a cropper BELOW an ordinary valley and only ever
+ *     settles one when the neighbourhood has nothing else left, which is what
+ *     actually keeps them available for the player through the first weeks.
  *
  * Pure data, so it is unit-tested without a database.
  */
@@ -65,36 +70,37 @@ class NpcTerrain
     /**
      * How much a tier wants a given tile, higher is better.
      *
-     * A hunter ranks a fifteen-cropper over a nine over anything else; everyone
-     * else scores every valley the same, so the caller's own ordering (distance
-     * for seeding, shuffled for expansion) survives untouched.
+     * A hunter ranks a fifteen-cropper over a nine over anything else. A
+     * non-hunter scores every ordinary valley the same, so the caller's own
+     * ordering (distance for seeding, shuffled for expansion) survives
+     * untouched - and scores a cropper BELOW them, so it is the last thing it
+     * settles rather than whatever happened to be closest.
      */
     public static function score($fieldtype, $tier)
     {
-        if (!self::hunts($tier) || !self::isCropper($fieldtype)) {
+        if (!self::isCropper($fieldtype)) {
             return 0;
+        }
+        if (!self::hunts($tier)) {
+            return -1;
         }
 
         return (int) $fieldtype === self::CROPPER_15 ? 2 : 1;
     }
 
     /**
-     * Reorder candidate tiles so a hunter sees its croppers first.
+     * Reorder candidate tiles: a hunter's croppers first, a non-hunter's last.
      *
-     * A stable sort on the score alone: for a non-hunter nothing moves, and for
-     * a hunter with no cropper in range nothing moves either. usort() is NOT
-     * stable before PHP 8.0 and this must not reshuffle the caller's order, so
-     * the original index is the tie-break.
+     * A stable sort on the score alone, so a list with no cropper in it comes
+     * back exactly as it was given for either tier. usort() is NOT stable
+     * before PHP 8.0 and this must not reshuffle the caller's distance order,
+     * so the original index is the tie-break.
      *
      * @param array $valleys Rows carrying at least a 'fieldtype' key.
      * @return array The same rows, best first.
      */
     public static function rank(array $valleys, $tier)
     {
-        if (!self::hunts($tier)) {
-            return $valleys;
-        }
-
         $ordered = array_values($valleys);
         $keyed   = [];
         foreach ($ordered as $index => $valley) {

@@ -56,12 +56,18 @@ if (NpcTerrain::score(6, NpcTiers::TOP) <= NpcTerrain::score(1, NpcTiers::TOP)) 
 if (NpcTerrain::score(1, NpcTiers::TOP) <= NpcTerrain::score(3, NpcTiers::TOP)) {
     npc_fail('A nine-cropper must outrank an ordinary valley.');
 }
-if (NpcTerrain::score(6, NpcTiers::CASUAL) !== 0) {
-    npc_fail('A casual must not score a cropper above anything else.');
+// A non-hunter does not merely ignore a cropper, it ranks it below an
+// ordinary valley: a small map has a handful of them and seeding walks the
+// closest valleys first, so "ignore" handed fifteen-croppers to the cows.
+if (NpcTerrain::score(6, NpcTiers::CASUAL) >= NpcTerrain::score(3, NpcTiers::CASUAL)) {
+    npc_fail('A casual must rank a cropper below an ordinary valley.');
+}
+if (NpcTerrain::score(3, NpcTiers::CASUAL) !== 0) {
+    npc_fail('A casual must score every ordinary valley the same.');
 }
 
 // rank(): the hunter's fifteen comes first, the nine second, and everything
-// else keeps the order the caller chose. A non-hunter's list never moves.
+// else keeps the order the caller chose. A non-hunter gets the mirror image.
 $pool = [
     ['id' => 1, 'fieldtype' => 3],
     ['id' => 2, 'fieldtype' => 1],
@@ -75,8 +81,19 @@ if (array_column($hunted, 'id') !== [4, 2, 1, 3, 5]) {
     npc_fail('rank did not put the croppers first, stably: ' . json_encode(array_column($hunted, 'id')));
 }
 
-if (NpcTerrain::rank($pool, NpcTiers::CASUAL) !== $pool) {
-    npc_fail('rank must leave a non-hunter\'s order completely alone.');
+// The same pool for a non-hunter: the ordinary valleys keep the caller's
+// order and the two croppers fall to the back, still in their own order.
+$avoided = NpcTerrain::rank($pool, NpcTiers::CASUAL);
+if (array_column($avoided, 'id') !== [1, 3, 5, 2, 4]) {
+    npc_fail('rank did not push a non-hunter\'s croppers to the back: ' . json_encode(array_column($avoided, 'id')));
+}
+
+// A list with no cropper in it comes back untouched for either tier.
+$plainPool = [['id' => 1, 'fieldtype' => 3], ['id' => 2, 'fieldtype' => 4], ['id' => 3, 'fieldtype' => 5]];
+foreach ([NpcTiers::TOP, NpcTiers::CASUAL, NpcTiers::INACTIVE] as $tier) {
+    if (NpcTerrain::rank($plainPool, $tier) !== $plainPool) {
+        npc_fail("rank must leave a cropper-free list alone for tier '$tier'.");
+    }
 }
 if (NpcTerrain::rank([], NpcTiers::TOP) !== []) {
     npc_fail('rank must survive an empty pool.');

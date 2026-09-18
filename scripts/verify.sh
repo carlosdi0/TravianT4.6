@@ -46,6 +46,7 @@ curl -fsS "$base_url/health.php" | rg -q '"status":"ready"'
 ./scripts/test-runtime.sh
 ./scripts/test-formulas.sh
 ./scripts/test-complete-round.sh
+./scripts/test-npc.sh
 if [ "${RUN_GAME_SMOKE:-0}" = '1' ]; then
     ./scripts/smoke-game.sh
 fi

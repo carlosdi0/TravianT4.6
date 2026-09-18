@@ -180,7 +180,10 @@ class PaymentProvidersCtrl
             //8 => 'PaySafeCard',
             9 => 'Arianpal',
         ];
-        $locations = $db->query("SELECT * FROM paymentProviders WHERE location={$_SESSION[WebService::fixSessionPrefix('locationId')]} ORDER BY posId ASC");
+        // With no location rows the session key is never set, and interpolating it raw
+        // produced "WHERE location= ORDER BY posId" and a fatal SQL syntax error.
+        $locationId = (int)($_SESSION[WebService::fixSessionPrefix('locationId')] ?? 0);
+        $locations = $db->query("SELECT * FROM paymentProviders WHERE location={$locationId} ORDER BY posId ASC");
         while ($row = $locations->fetch_assoc()) {
             $params['content'] .= '<tr>';
             $params['content'] .= '<td>' . $row['providerId'] . '</td>';

@@ -205,8 +205,16 @@ class premiumFeature extends AjaxBase
             $selectedLocation = $def;
         }
         $_SESSION[WebService::fixSessionPrefix('default_payment_location')] = $selectedLocation;
-        $view = new PHPBatchView("payment/showLowGold");
         $products = self::getLocationProducts($selectedLocation);
+        // No products means the shop is off, and showLowGold would offer a package that
+        // cannot be bought. Say so instead of rendering a dialog out of nulls.
+        if (!$products) {
+            $data['options']['html'] = '<div class="buyGoldContent paymentWizardDirection'
+                . getDirection() . '"><div class="error">'
+                . T("PaymentWizard", "paymentUnAvailable") . '</div></div>';
+            return $data;
+        }
+        $view = new PHPBatchView("payment/showLowGold");
         $product = $products[0];
         foreach ($products as $pro) {
             if ($pro['goldProductGold'] >= $neededGold) {

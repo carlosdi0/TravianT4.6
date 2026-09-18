@@ -27,6 +27,9 @@
 - POST-only sitter assignment and removal controls with checker validation.
 - Authenticated smoke coverage for the account-options page and its checker
   token, plus the sitter-options page.
+- Server-run neighbours: manual seeding, the growth and expansion passes, their
+  scheduling beside the existing bots, an `npc.php` administration command, and
+  execution-layer regression coverage. See `docs/NPC.md`.
 
 ### Changed
 

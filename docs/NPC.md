@@ -53,6 +53,13 @@ size, reach, sleeping hours and how long a grudge lasts.
 derives a stable daily rhythm from its own uid, so neighbours do not all act at
 the same moment without any of that being stored.
 
+**Terrain follows the tier.** Only `top` hunts croppers, and everybody else
+actively AVOIDS them: seeding walks the free valleys closest first, so merely
+"not hunting" handed fifteen-croppers to the cows on any map where one happened
+to be nearby. A non-hunter settles a cropper only when the neighbourhood has
+nothing else left, which is what keeps them available for the player through
+the first weeks.
+
 ## Architecture
 
 Three layers, and the separation is the design.
@@ -61,7 +68,7 @@ Three layers, and the separation is the design.
 
 Pure classes. No database handle, no session, no globals, no `Formulas`. Data
 goes in, a decision comes out. This is what makes the behaviour testable without
-standing up a world, and the 19 regression tests under `tests/npc-*.php` run in
+standing up a world, and the 20 regression tests under `tests/npc-*.php` run in
 seconds because of it.
 
 Anything a brain needs to know about the ruleset — unit stats, building
@@ -82,7 +89,7 @@ Two consequences worth stating, because both were bugs waiting to happen:
   this design came from, and a divergent copy of a game rule is the kind of bug
   that surfaces months later as "combat feels wrong".
 
-### 2. Execution — planned
+### 2. Execution — `main_script/include/Model/Npc*Model.php`
 
 Reads the world, asks layer 1 what to do, and writes the result through the
 existing models: `Game\Buildings\BuildingAction`, `Model\TrainingModel`,
@@ -90,15 +97,53 @@ existing models: `Game\Buildings\BuildingAction`, `Model\TrainingModel`,
 `Core\Session` (backed by `$_SESSION`, which does not exist in a worker) and on
 `Core\Village`, whose failure path calls `exit()`.
 
-Troop movements use `MovementsModel::addMovementWithSourceMutation()`, which
-puts the troop deduction and the movement row in one transaction.
+- **`NpcModel`** is the only class that knows what a table is. Every other pass
+  goes through it, so there is exactly one place that knows an account's
+  villages are derived from `vdata.owner` and never stored.
+- **`NpcSeedModel`** creates accounts. Manual only; see below.
+- **`NpcGrowthModel`** runs the growth pass: levels, troops and the hero.
+- **`NpcExpandModel`** founds villages.
 
-### 3. Scheduling — planned
+Troop movements will use `MovementsModel::addMovementWithSourceMutation()`,
+which puts the troop deduction and the movement row in one transaction.
 
-Sub-jobs in `Core\Jobs\Launcher::AIProgress()`, following the pattern the
-existing bots already use. Four passes on independent intervals: upkeep, growth,
-raids and expansion. Each pass handles a small batch, oldest-touched first, so a
-tick stays cheap no matter how many neighbours exist.
+#### Buildings are applied, troops are queued
+
+A neighbour does not run an economy. Its population comes from its own curve,
+so the growth pass writes levels **straight through `BuildingAction::upgrade()`**
+rather than queueing them in `building_upgrade`: that queue is a spend of
+resources a neighbour does not have.
+
+Troops go the other way. They are queued through `TrainingModel::addTraining()`,
+so they take real time to appear and a raid that kills a garrison buys the
+player actual hours. The one exception is seeding, which writes them directly:
+an account born three weeks old has to come with the garrison those weeks would
+have produced, and queueing it would leave a whole neighbourhood undefended for
+hours after every seed.
+
+`BuildingAction::upgrade()` reads `f{slot}t` to know what it is raising and
+silently does nothing when the slot is empty, so the gid is written into the
+slot first for a building the village does not have yet.
+
+#### The hero grows, like a fake user's
+
+`FakeUserModel::handleFakeUsers()` is the only other place in the engine where
+a hero gains experience without going on an adventure, and neighbours borrow
+the idea. The difference is the pace: a top neighbour's hero pulls ahead, a
+casual's trails, and a cow's stops on the day the account does. A player who
+scouts one can read the account's seriousness off its hero, exactly as they
+would a real neighbour's.
+
+### 3. Scheduling — `Core\Jobs\Launcher::AIProgress()`
+
+Sub-jobs beside the ones the existing bots use: `AIProgress:npcGrowth` every 30
+seconds and `AIProgress:npcExpand` every two minutes. Raids and upkeep are not
+implemented yet.
+
+**The job interval is not the account interval.** A job tick considers a BATCH;
+how often one account acts is `npc.growthInterval`, which the model applies per
+row, oldest-touched first. Keeping the two apart is what lets a world with
+hundreds of neighbours stay as cheap per tick as one with ten.
 
 One rule that is easy to get wrong: **growth scales with server speed, rhythm
 does not**. The economy runs in game time, but sleeping hours and raid cooldowns
@@ -127,6 +172,34 @@ an administrator seeds it deliberately. Automatic seeding would mean every fresh
 install silently populates itself, which is impossible to undo cleanly once the
 accounts have grown.
 
+```sh
+docker compose exec app php /app/main_script/copyable/include/npc.php status
+docker compose exec app php /app/main_script/copyable/include/npc.php seed 24
+docker compose exec app php /app/main_script/copyable/include/npc.php seed 8 --x=0 --y=0 --radius-min=3 --radius-max=12
+```
+
+With no coordinates the ring is drawn around **the biggest human player's
+capital**, because "give the player some neighbours" is what the feature is
+for. The centre of the map is not used as a fallback: a world whose only player
+lives in a corner would get its neighbours nowhere near them, so a world with no
+player yet refuses to seed until it is told where.
+
+`grow` and `expand` run one pass by hand, which is how a freshly seeded world is
+checked without waiting for the worker.
+
+There is deliberately no `purge`. Seeding is meant to be a decision, and an
+undo button makes it a smaller one than it is.
+
+## Settings
+
+`config.php` has an `npc` block, read through `getNpc()`. The knobs worth
+knowing: `enabled` turns the worker passes off without the neighbours leaving
+the map, `seedRadiusMin`/`seedRadiusMax` set the ring, the four `tier*Pct`
+values set the world's mix, and `popLead`/`villageLead` are an optional leash
+back to the human player that defaults to off.
+
+The ceilings that matter most are NOT there. See the next section.
+
 ## Deliberate limitations
 
 - **Neighbours do not send or receive messages or battle reports.** They read
@@ -140,8 +213,25 @@ accounts have grown.
 
 ## Status
 
-Implemented: the decision layer (`Game\Npc`, 19 classes with regression
-coverage), the ruleset adapter, and the schema (`005_npc_players.sql`).
+Implemented: the decision layer (`Game\Npc`, 20 classes with regression
+coverage), the ruleset adapter, the schema (`005_npc_players.sql`), seeding,
+the growth and expansion passes, and their scheduling.
 
-Not implemented: seeding, the execution layer, scheduling, alliances between
-neighbours, and the admin panel.
+Not implemented: raids (`NpcTargeting`, `NpcFarmList`, `NpcRealAttackPolicy`
+and `NpcArmyRoles::raidWave()` are all written and tested, but nothing calls
+them yet), the upkeep pass, alliances between neighbours (`NpcAlliances` is in
+the same position), trading, and the admin panel.
+
+### Test coverage
+
+`tests/npc-*.php` cover the decision layer and need no world at all, so
+`scripts/test-npc.sh` runs them in seconds. The execution layer is covered by
+`tests/runtime-npc.php`, which seeds real accounts into the running world and
+deletes them on the way out; it runs from `scripts/test-runtime.sh`, and its
+job is the four things that break first:
+
+- a seeded neighbour is an ordinary account in every table;
+- `vdata.pop`, `users.total_pop` and what the engine recomputes from `fdata`
+  all agree, which is what drifts when a pass writes levels by hand;
+- a cow that has quit stays frozen through both passes;
+- two seed runs never put two villages on one map square.

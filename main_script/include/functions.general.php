@@ -42,6 +42,20 @@ function getGame($name)
     return (property_exists($config->game, $name)) ? $config->game->$name : false;
 }
 
+/**
+ * A server-run neighbour setting. Returns $default rather than false for a
+ * missing key: most of these are numbers, and a silent 0 for an interval would
+ * turn a cheap pass into a hot loop.
+ */
+function getNpc($name, $default = null)
+{
+    $config = Config::getInstance();
+    if (!property_exists($config, 'npc') || !property_exists($config->npc, $name)) {
+        return $default;
+    }
+    return $config->npc->$name;
+}
+
 function logError($error, $parameters = [])
 {
     $text = vsprintf($error, $parameters);

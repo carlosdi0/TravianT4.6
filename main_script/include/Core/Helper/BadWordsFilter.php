@@ -25,13 +25,35 @@ class BadWordsFilter
 
     public function censorString($string, $mainString)
     {
-        foreach ($this->badWords as $link) {
-            if (!empty($string) && strpos($string, $link) !== FALSE) {
-                Notification::notify("bad words detected!",
-                    "Player " . Session::getInstance()->getName() . " is trying to use bad words $link.");
-                return false;
+        $match = self::matchBadWord($string, $this->badWords);
+        if ($match === NULL) {
+            return true;
+        }
+        Notification::notify("bad words detected!",
+            "Player " . Session::getInstance()->getName() . " is trying to use bad words $match.");
+        return false;
+    }
+
+    /**
+     * An empty list entry is not a wildcard. explode() on an empty or
+     * comma-padded filter file yields "" entries, and strpos($string, "")
+     * returns 0, so without this guard every name and message on the server
+     * would be rejected as profanity.
+     */
+    public static function matchBadWord($string, array $badWords)
+    {
+        if ((string)$string === '') {
+            return NULL;
+        }
+        foreach ($badWords as $badWord) {
+            $badWord = trim((string)$badWord);
+            if ($badWord === '') {
+                continue;
+            }
+            if (strpos($string, $badWord) !== FALSE) {
+                return $badWord;
             }
         }
-        return true;
+        return NULL;
     }
 }

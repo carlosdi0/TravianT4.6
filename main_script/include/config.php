@@ -218,6 +218,58 @@ $config = (object)[
         'smallFarmsResourcesLevel' => 8,
         'smallFarmsStorageCount'   => 1,
     ],
+    // Server-run neighbours. See docs/NPC.md; the growth ceilings that matter
+    // most are NOT here, they are frozen per account at seed time on purpose.
+    'npc'                   => (object)[
+        // Master switch for the worker passes. Seeding is always manual and
+        // ignores this: an admin who seeded a world can turn the passes off
+        // without the neighbours disappearing from the map.
+        'enabled'            => true,
+        // Ring, in map squares, that seeding places villages in around the
+        // chosen centre. Close enough to raid on foot, far enough that the
+        // player is not boxed in on day one.
+        'seedRadiusMin'      => 4,
+        'seedRadiusMax'      => 20,
+        // Per-account power band, 35..85 by design: a neighbour at 0 would
+        // never grow into anything and one at 100 would outclass the player.
+        'powerMin'           => 35,
+        'powerMax'           => 85,
+        // Share of each tier in the world, in percent. Normalised, so these
+        // do not have to add up.
+        'tierTopPct'         => 10,
+        'tierBuilderPct'     => 20,
+        'tierCasualPct'      => 40,
+        'tierInactivePct'    => 30,
+        // Seconds of REAL time between growth passes for one account. The
+        // economy runs in game time; the rhythm imitates a person, and a
+        // person does not wake up ten times faster on a speed-10 world.
+        'growthInterval'     => 900,
+        'expandInterval'     => 7200,
+        // Accounts touched per pass, oldest first, so a tick stays cheap no
+        // matter how many neighbours the world holds.
+        'growthBatch'        => 10,
+        'expandBatch'        => 5,
+        // Base chance an eligible account founds a village on a pass it is
+        // due for; the tier, trait and power modulate it (NpcExpansion).
+        'expandChance'       => 60,
+        // Hard ceiling on villages per account, clamping the tier's own cap.
+        'expandMaxVillages'  => 9,
+        // How far from its own capital an account will settle. A village on
+        // the far side of the map is not one the account would ever defend,
+        // and not one the player reads as the same neighbour.
+        'expandRadius'       => 12,
+        // Optional leash back to the human player. 0 = off, which is the
+        // default: the world grows on its own curve and does not wait.
+        'popLead'            => 0,
+        'villageLead'        => 0,
+        // Units ordered in one training row. A single order of twenty
+        // thousand is a row that takes days to drain and cannot be split.
+        'trainBatchMax'      => 50,
+        // Hero experience a full-pace account earns per game day. Mirrors the
+        // fake-user pass, which is the only other hero in the engine that
+        // grows without adventures.
+        'heroExpPerDay'      => 120,
+    ],
     'custom'                => (object)[
         'allowInterruptionInGame' => IS_DEV,
         'batchCelebration'                        => true,

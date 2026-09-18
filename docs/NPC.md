@@ -53,6 +53,13 @@ size, reach, sleeping hours and how long a grudge lasts.
 derives a stable daily rhythm from its own uid, so neighbours do not all act at
 the same moment without any of that being stored.
 
+**Terrain follows the tier.** Only `top` hunts croppers, and everybody else
+actively AVOIDS them: seeding walks the free valleys closest first, so merely
+"not hunting" handed fifteen-croppers to the cows on any map where one happened
+to be nearby. A non-hunter settles a cropper only when the neighbourhood has
+nothing else left, which is what keeps them available for the player through
+the first weeks.
+
 ## Architecture
 
 Three layers, and the separation is the design.
@@ -61,7 +68,7 @@ Three layers, and the separation is the design.
 
 Pure classes. No database handle, no session, no globals, no `Formulas`. Data
 goes in, a decision comes out. This is what makes the behaviour testable without
-standing up a world, and the 19 regression tests under `tests/npc-*.php` run in
+standing up a world, and the 20 regression tests under `tests/npc-*.php` run in
 seconds because of it.
 
 Anything a brain needs to know about the ruleset — unit stats, building
@@ -82,7 +89,7 @@ Two consequences worth stating, because both were bugs waiting to happen:
   this design came from, and a divergent copy of a game rule is the kind of bug
   that surfaces months later as "combat feels wrong".
 
-### 2. Execution — planned
+### 2. Execution — `main_script/include/Model/Npc*Model.php`
 
 Reads the world, asks layer 1 what to do, and writes the result through the
 existing models: `Game\Buildings\BuildingAction`, `Model\TrainingModel`,
@@ -90,15 +97,53 @@ existing models: `Game\Buildings\BuildingAction`, `Model\TrainingModel`,
 `Core\Session` (backed by `$_SESSION`, which does not exist in a worker) and on
 `Core\Village`, whose failure path calls `exit()`.
 
-Troop movements use `MovementsModel::addMovementWithSourceMutation()`, which
-puts the troop deduction and the movement row in one transaction.
+- **`NpcModel`** is the only class that knows what a table is. Every other pass
+  goes through it, so there is exactly one place that knows an account's
+  villages are derived from `vdata.owner` and never stored.
+- **`NpcSeedModel`** creates accounts. Manual only; see below.
+- **`NpcGrowthModel`** runs the growth pass: levels, troops and the hero.
+- **`NpcExpandModel`** founds villages.
 
-### 3. Scheduling — planned
+Troop movements will use `MovementsModel::addMovementWithSourceMutation()`,
+which puts the troop deduction and the movement row in one transaction.
 
-Sub-jobs in `Core\Jobs\Launcher::AIProgress()`, following the pattern the
-existing bots already use. Four passes on independent intervals: upkeep, growth,
-raids and expansion. Each pass handles a small batch, oldest-touched first, so a
-tick stays cheap no matter how many neighbours exist.
+#### Buildings are applied, troops are queued
+
+A neighbour does not run an economy. Its population comes from its own curve,
+so the growth pass writes levels **straight through `BuildingAction::upgrade()`**
+rather than queueing them in `building_upgrade`: that queue is a spend of
+resources a neighbour does not have.
+
+Troops go the other way. They are queued through `TrainingModel::addTraining()`,
+so they take real time to appear and a raid that kills a garrison buys the
+player actual hours. The one exception is seeding, which writes them directly:
+an account born three weeks old has to come with the garrison those weeks would
+have produced, and queueing it would leave a whole neighbourhood undefended for
+hours after every seed.
+
+`BuildingAction::upgrade()` reads `f{slot}t` to know what it is raising and
+silently does nothing when the slot is empty, so the gid is written into the
+slot first for a building the village does not have yet.
+
+#### The hero grows, like a fake user's
+
+`FakeUserModel::handleFakeUsers()` is the only other place in the engine where
+a hero gains experience without going on an adventure, and neighbours borrow
+the idea. The difference is the pace: a top neighbour's hero pulls ahead, a
+casual's trails, and a cow's stops on the day the account does. A player who
+scouts one can read the account's seriousness off its hero, exactly as they
+would a real neighbour's.
+
+### 3. Scheduling — `Core\Jobs\Launcher::AIProgress()`
+
+Sub-jobs beside the ones the existing bots use: `AIProgress:npcGrowth` every 30
+seconds and `AIProgress:npcExpand` every two minutes. Raids and upkeep are not
+implemented yet.
+
+**The job interval is not the account interval.** A job tick considers a BATCH;
+how often one account acts is `npc.growthInterval`, which the model applies per
+row, oldest-touched first. Keeping the two apart is what lets a world with
+hundreds of neighbours stay as cheap per tick as one with ten.
 
 One rule that is easy to get wrong: **growth scales with server speed, rhythm
 does not**. The economy runs in game time, but sleeping hours and raid cooldowns
@@ -127,6 +172,34 @@ an administrator seeds it deliberately. Automatic seeding would mean every fresh
 install silently populates itself, which is impossible to undo cleanly once the
 accounts have grown.
 
+```sh
+docker compose exec app php /app/main_script/copyable/include/npc.php status
+docker compose exec app php /app/main_script/copyable/include/npc.php seed 24
+docker compose exec app php /app/main_script/copyable/include/npc.php seed 8 --x=0 --y=0 --radius-min=3 --radius-max=12
+```
+
+With no coordinates the ring is drawn around **the biggest human player's
+capital**, because "give the player some neighbours" is what the feature is
+for. The centre of the map is not used as a fallback: a world whose only player
+lives in a corner would get its neighbours nowhere near them, so a world with no
+player yet refuses to seed until it is told where.
+
+`grow` and `expand` run one pass by hand, which is how a freshly seeded world is
+checked without waiting for the worker.
+
+There is deliberately no `purge`. Seeding is meant to be a decision, and an
+undo button makes it a smaller one than it is.
+
+## Settings
+
+`config.php` has an `npc` block, read through `getNpc()`. The knobs worth
+knowing: `enabled` turns the worker passes off without the neighbours leaving
+the map, `seedRadiusMin`/`seedRadiusMax` set the ring, the four `tier*Pct`
+values set the world's mix, and `popLead`/`villageLead` are an optional leash
+back to the human player that defaults to off.
+
+The ceilings that matter most are NOT there. See the next section.
+
 ## Deliberate limitations
 
 - **Neighbours do not send or receive messages or battle reports.** They read
@@ -140,8 +213,117 @@ accounts have grown.
 
 ## Status
 
-Implemented: the decision layer (`Game\Npc`, 19 classes with regression
-coverage), the ruleset adapter, and the schema (`005_npc_players.sql`).
+Implemented: the decision layer (`Game\Npc`, 20 classes with regression
+coverage), the ruleset adapter, the schema (`005_npc_players.sql`), seeding,
+the growth and expansion passes, and their scheduling.
 
-Not implemented: seeding, the execution layer, scheduling, alliances between
-neighbours, and the admin panel.
+Not implemented: the upkeep pass, raids, alliances between neighbours, trading,
+and the admin panel. What is left is mostly WIRING: the decision classes for
+raids and alliances are written and tested, and nothing calls them.
+
+## What is left, in the order it should be done
+
+Each of these is a pass in the same shape as the two that exist: a `run()` that
+takes a batch oldest-first, stamps the row before the attempt, and catches per
+account. Copy `NpcGrowthModel::run()`.
+
+### 1. Upkeep — the one that is not optional
+
+**Nothing else should be built before this.** `Game\Starvation` skips owners
+with `id <= 2`, which is the Natars, Support and Multihunter. **Neighbours are
+not skipped**: an NPC whose crop reaches zero has its garrison eaten, exactly
+like a player's.
+
+Today this is survivable by accident rather than by design.
+`NpcBalance::cropCap()` caps a village's army at `maxcrop * 1.2`, and granary
+level tracks field level closely enough that net crop stays positive on a
+freshly grown world — the seeded local world runs between +1400 and +11000 crop
+an hour. It stops being survivable the first time a player raids one flat, or
+an account loses the villages that were feeding the rest.
+
+The pass keeps a crop floor per village. `NpcBalance` already documents the
+figure it assumes: *a quarter of the granary every ten minutes*, which is what
+`ARMY_PER_MAXCROP` was derived from. Do not invent a second number.
+
+### 2. Raids
+
+Every decision this needs already exists and is covered by tests:
+
+| Question | Answer |
+| --- | --- |
+| Is it time? | `NpcTargeting::isReady()`, `NpcClock::nextAttack()` |
+| Awake? | `NpcClock::isAsleep()`, `wakeAt()` |
+| Who? | `NpcTargeting::candidates()`, `pickTarget()`, `softest()` |
+| Worth it? | `NpcDefenceEstimate::availableLoot()`, `cranny()` |
+| Survivable? | `NpcDefenceEstimate::defence()`, `hasSuperiority()` |
+| With what? | `NpcArmyRoles::raidWave()`, `scoutParty()` |
+| Real attack? | `NpcRealAttackPolicy::allows()`, `refusal()` |
+| Come back to it? | `NpcFarmList::pick()`, `shouldBurn()`, `burnUntil()` |
+
+The `npc_farm` table is already in `005_npc_players.sql` with every column the
+farm list needs, and `npc_player` carries `next_attack`, `burst`, `last_attack`,
+`grudge_hits`, `grudge_since`, `last_raider`, `raid_loot` and `raid_hits`.
+
+Three things to get right, because none of them is obvious:
+
+- **Send with `MovementsModel::addMovementWithSourceMutation()`**, never
+  `addMovement()`. It takes a `callable $sourceMutation` and puts the troop
+  deduction and the movement row in one transaction. `addMovement()` alone
+  creates an army that is in two places at once.
+- **Convert the wave with `NpcTroopMapping::toAttackSlots()`.** The brains
+  answer in tribe-relative slots; the movement row wants eleven ordered values.
+- **Loot has to come back into `npc_player.raid_loot`**, or `NpcBalance::
+  lootBonus()` never lifts a raider's ceiling and the whole farm-king arc does
+  nothing. The battle result is the only place that number exists.
+
+### 3. Alliances
+
+`NpcAlliances` (357 lines, tested) plans blocs, confederations, wars and which
+alliance may raid which. Nothing writes `alidata` or `users.aid` yet. It is
+worth doing after raids, because `mayRaid()` and `friendly()` only mean
+something once there are raids to refuse.
+
+### 4. Admin panel
+
+There is none, and `npc.php` covers the operational need. A panel is only worth
+it once an administrator has a reason to change one account rather than the
+world — which is really a reason to want per-account overrides, and those do
+not exist either.
+
+## Known gaps in what IS implemented
+
+- **Building dependencies are not checked.** `NpcBuildOrder` walks goals in a
+  sensible order and `BuildingAction::upgrade()` does not validate prerequisites,
+  so an NPC village can in principle hold a building whose requirements it does
+  not meet. Not observed in practice, because the order puts the main building
+  and rally point early. A player who conquers such a village inherits it.
+- **Research is never done, and the training pass does not care.** `tdata` stays
+  at its defaults, and nothing consults it: a neighbour queues units it has not
+  researched, because `addTraining()` is given the row directly and the engine
+  only validates in the controller. This is the established pattern rather than
+  an oversight - `Core\AI::SKIP_RESEARCH` is `TRUE` and the fake users have
+  always done the same - but it is worth knowing before anyone reads an NPC's
+  army as evidence of what it researched.
+- **Weapon and armour upgrades are never researched.** The smithy BUILDING is in
+  every build order, but the `smithy` table's `u1..u10` levels stay at 0, so NPC
+  troops always fight unupgraded. A player reading a combat report will see it.
+- **Great barracks and great stable are never built.** No build order lists gids
+  29 or 30, so the mapping `NpcGrowthModel::trainableSlots()` keeps for them is
+  dead code until one does.
+- **A conquered neighbour keeps its registry row.** Correct - the villages are
+  derived from `vdata.owner` - but an account down to zero villages is fetched
+  by every batch and skipped. Harmless, and cheap to fix when it matters.
+
+## Test coverage
+
+`tests/npc-*.php` cover the decision layer and need no world at all, so
+`scripts/test-npc.sh` runs them in seconds. The execution layer is covered by
+`tests/runtime-npc.php`, which seeds real accounts into the running world and
+deletes them on the way out; it runs from `scripts/test-runtime.sh`, and its
+job is the four things that break first:
+
+- a seeded neighbour is an ordinary account in every table;
+- `vdata.pop`, `users.total_pop` and what the engine recomputes from `fdata`
+  all agree, which is what drifts when a pass writes levels by hand;
+- a cow that has quit stays frozen through both passes;
+- two seed runs never put two villages on one map square.

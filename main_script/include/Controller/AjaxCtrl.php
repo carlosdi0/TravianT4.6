@@ -24,13 +24,20 @@ class AjaxCtrl extends AnyCtrl
         if (isset($_GET['cmd'])) {
             $cmd = filter_var($_GET['cmd'], FILTER_SANITIZE_STRING);
             $response = ["response" => ['error' => FALSE, 'errorMsg' => NULL, 'data' => [],],];
-            if (in_array($cmd, ['paymentProviders', 'paymentRules', 'paymentWizard'], true)) {
-                $response['response']['error'] = TRUE;
-                $response['response']['errorMsg'] = 'Payments are disabled in this release.';
-                response($response);
-            }
             if (!in_array($cmd, ['news', 'configuration'])) {
                 $this->checkAjaxToken($response);
+            }
+            // Only the checkout is off: it redirects to a payment host this fork does not
+            // ship. paymentWizard stays reachable because its buyGold tab already falls
+            // back to the "payment unavailable" view, and its other tabs are where players
+            // spend the gold they already hold (Plus, gold club, production boosts).
+            // Answer with markup rather than an error: the dialog drops errorMsg on the
+            // floor and would render an empty box.
+            if (in_array($cmd, ['paymentProviders', 'paymentRules'], true)) {
+                $response['response']['data']['html'] = '<div class="buyGoldContent paymentWizardDirection'
+                    . getDirection() . '"><div class="error">'
+                    . T("PaymentWizard", "paymentUnAvailable") . '</div></div>';
+                response($response);
             }
             if (!file_exists(__DIR__ . DIRECTORY_SEPARATOR . "Ajax" . DIRECTORY_SEPARATOR . $cmd . ".php")) {
                 $response['response']['error'] = TRUE;

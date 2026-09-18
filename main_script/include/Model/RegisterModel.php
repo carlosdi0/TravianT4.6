@@ -21,6 +21,17 @@ use const MAP_SIZE;
 
 class RegisterModel
 {
+    /**
+     * Seed value for vdata.lastVillageCheck on a freshly created village.
+     *
+     * The AI loops (NatarsModel::handleNatarVillages, FakeUserModel::handleFakeUsers)
+     * treat anything <= 10 as "never checked": they claim the village, stamp the
+     * current time and skip that pass, so the first real pass gets a sane elapsed
+     * time instead of one measured from the epoch. It must stay above 0, which is
+     * what the Natar query uses to exclude nothing-to-do rows.
+     */
+    public const NEW_VILLAGE_CHECK_SENTINEL = 1;
+
     public function userExistsWithId($uid)
     {
         $db = DB::getInstance();
@@ -230,7 +241,10 @@ class RegisterModel
         $maxRes = 800 * getGame("storage_multiplier");
         $minRes = ceil($maxRes * 0.9375);
         $fieldType = $db->fetchScalar("SELECT fieldtype FROM wdata WHERE id=$kid");
-        $row = vsprintf("'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s'",
+        // The placeholder list must stay aligned with the column list below: it used
+        // to be one short, so isArtifact landed in lastVillageCheck and left every
+        // new village invisible to the Natar AI loop (which filters on > 0).
+        $row = vsprintf("'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s'",
             [
                 $kid,
                 $uid,
@@ -251,10 +265,11 @@ class RegisterModel
                 $isWW ? 1 : 0,
                 $expandedFrom,
                 $isArtifact ? 1 : 0,
+                self::NEW_VILLAGE_CHECK_SENTINEL,
             ]);
         $db->query("UPDATE wdata SET occupied=1 WHERE id=$kid");
         $db->begin_transaction();
-        $good = $db->query("INSERT INTO vdata (kid, owner, fieldtype, name, capital, pop, cp, wood, clay, iron, crop, maxstore, maxcrop, last_loyalty_update, lastmupdate, created, isWW, expandedfrom, lastVillageCheck) VALUES ($row)");
+        $good = $db->query("INSERT INTO vdata (kid, owner, fieldtype, name, capital, pop, cp, wood, clay, iron, crop, maxstore, maxcrop, last_loyalty_update, lastmupdate, created, isWW, expandedfrom, isArtifact, lastVillageCheck) VALUES ($row)");
         if (!$good || !$db->affectedRows()) {
             $db->query("UPDATE available_villages SET occupied=0 WHERE kid=$kid");
             $db->query("UPDATE wdata SET occupied=0 WHERE id=$kid");

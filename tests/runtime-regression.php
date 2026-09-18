@@ -35,6 +35,7 @@ use Model\NatarsModel;
 use Model\OasesModel;
 use Model\OptionModel;
 use Model\RallyPoint\RallyPointModel;
+use Model\RegisterModel;
 use Model\Units;
 use Model\VillageModel;
 use Model\WonderOfTheWorldModel;
@@ -6920,6 +6921,83 @@ try {
         $db->rollback();
     }
     $db->query("ALTER TABLE users AUTO_INCREMENT=$userAutoIncrement");
+}
+
+// A new village must land in vdata with isArtifact and lastVillageCheck in their
+// own columns. While the INSERT was one value short the two swapped places, so
+// every Natar village was born with lastVillageCheck=0 -- the value the AI loop
+// filters out -- and never upgraded a building or trained a unit all round.
+// _createVillage commits on its own, so this block cannot be wrapped in the
+// usual rollback and cleans up by hand instead.
+$natarSeedKids = [];
+$natarSeedOwner = $db->query(
+    "SELECT cp, cp_prod, total_pop, total_villages, lastupdate, profileCacheVersion FROM users WHERE id=1"
+)->fetch_assoc();
+expect_true((bool)$natarSeedOwner, 'Natar account present for village seeding');
+try {
+    $natarSeedFields = $db->query(
+        "SELECT w.id
+         FROM wdata w JOIN available_villages a ON a.kid=w.id
+         WHERE w.id>0 AND w.fieldtype>0 AND w.occupied=0 AND a.occupied=0 AND w.oasistype=0
+           AND ROUND(SQRT(POW(w.x, 2)+POW(w.y, 2)))>22
+           AND NOT EXISTS (SELECT 1 FROM vdata v WHERE v.kid=w.id)
+         ORDER BY w.id DESC LIMIT 2"
+    );
+    expect_same(2, $natarSeedFields->num_rows, 'Natar seeding fixture fields available');
+    while ($natarSeedField = $natarSeedFields->fetch_assoc()) {
+        $natarSeedKids[] = (int)$natarSeedField['id'];
+    }
+    [$natarPlainKid, $natarArtifactKid] = $natarSeedKids;
+
+    $natarRegister = new RegisterModel();
+    expect_true($natarRegister->createNewNatarVillage($natarPlainKid), 'Natar village created');
+    expect_true(
+        (bool)$natarRegister->createArtifactVillage($natarArtifactKid, 12, 1, [1 => 10]),
+        'Natar artifact village created'
+    );
+
+    expect_same(
+        '0|1',
+        (string)$db->fetchScalar(
+            "SELECT CONCAT(isArtifact, '|', lastVillageCheck) FROM vdata WHERE kid=$natarPlainKid"
+        ),
+        'new Natar village seeded as growable'
+    );
+    expect_same(
+        '1|1',
+        (string)$db->fetchScalar(
+            "SELECT CONCAT(isArtifact, '|', lastVillageCheck) FROM vdata WHERE kid=$natarArtifactKid"
+        ),
+        'artifact village keeps its own flag'
+    );
+    // Same filter NatarsModel::handleNatarVillages runs, restricted to the fixtures.
+    expect_same(
+        (string)$natarPlainKid,
+        (string)$db->fetchScalar(
+            "SELECT GROUP_CONCAT(kid) FROM vdata
+             WHERE owner=1 AND isWW=0 AND isFarm=0 AND isArtifact=0 AND lastVillageCheck > 0
+               AND kid IN ($natarPlainKid, $natarArtifactKid)"
+        ),
+        'Natar AI loop claims the new village and skips the artifact one'
+    );
+} finally {
+    if ($natarSeedKids) {
+        $natarSeedKidList = implode(',', $natarSeedKids);
+        foreach (['vdata', 'fdata', 'units', 'tdata', 'smithy'] as $natarSeedTable) {
+            $db->query("DELETE FROM $natarSeedTable WHERE kid IN ($natarSeedKidList)");
+        }
+        $db->query("UPDATE wdata SET occupied=0 WHERE id IN ($natarSeedKidList)");
+        $db->query("UPDATE available_villages SET occupied=0 WHERE kid IN ($natarSeedKidList)");
+    }
+    if ($natarSeedOwner) {
+        $db->query(
+            "UPDATE users SET cp={$natarSeedOwner['cp']}, cp_prod={$natarSeedOwner['cp_prod']},
+                total_pop={$natarSeedOwner['total_pop']}, total_villages={$natarSeedOwner['total_villages']},
+                lastupdate={$natarSeedOwner['lastupdate']},
+                profileCacheVersion={$natarSeedOwner['profileCacheVersion']}
+             WHERE id=1"
+        );
+    }
 }
 
 echo "Runtime regression checks passed.\n";

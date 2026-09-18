@@ -134,6 +134,10 @@ Original prompt: Improve the Travian 4.6 fork using project-improvements/README.
   villages and failed replacement-route inserts, with rollback, retry, terminal
   quarantine, and duplicate-replay regression coverage.
 
+- Added the server-run neighbour execution layer: manual seeding, the growth and
+  expansion passes, their scheduling beside the existing bots, an `npc.php`
+  administration command, and execution-layer regression coverage.
+
 ## Current work
 
 - Keep the complete-round regression and full verifier green while closing the
@@ -143,3 +147,15 @@ Original prompt: Improve the Travian 4.6 fork using project-improvements/README.
 
 - Promote the finished sanitized release branch to public `main` only after
   explicit approval of the guarded history replacement.
+- Finish the server-run neighbours in the order `docs/NPC.md` sets out: the
+  upkeep pass first (`Game\Starvation` does NOT skip them, so a raided-flat
+  neighbour can have its own garrison eaten), then raids, then alliances. The
+  decision classes for all three are written and covered; what is missing is
+  the wiring.
+- Investigate cropper density on small maps. `InstallerModel::getFieldType()`
+  deliberately leaves fieldtypes 1 and 6 out of its random roll and places every
+  cropper from `include/schema/crops.json`, whose coordinates are absolute. On a
+  `GAME_MAP_SIZE=25` world that lands 743 nine-croppers and 732 fifteen-croppers
+  in 2601 squares against 216 ordinary 4-4-4-6 valleys, which inverts what the
+  terrain is supposed to be worth. Changing it alters world generation for every
+  new world, so it needs a decision before a fix.

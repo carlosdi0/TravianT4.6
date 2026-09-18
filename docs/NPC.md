@@ -217,12 +217,104 @@ Implemented: the decision layer (`Game\Npc`, 20 classes with regression
 coverage), the ruleset adapter, the schema (`005_npc_players.sql`), seeding,
 the growth and expansion passes, and their scheduling.
 
-Not implemented: raids (`NpcTargeting`, `NpcFarmList`, `NpcRealAttackPolicy`
-and `NpcArmyRoles::raidWave()` are all written and tested, but nothing calls
-them yet), the upkeep pass, alliances between neighbours (`NpcAlliances` is in
-the same position), trading, and the admin panel.
+Not implemented: the upkeep pass, raids, alliances between neighbours, trading,
+and the admin panel. What is left is mostly WIRING: the decision classes for
+raids and alliances are written and tested, and nothing calls them.
 
-### Test coverage
+## What is left, in the order it should be done
+
+Each of these is a pass in the same shape as the two that exist: a `run()` that
+takes a batch oldest-first, stamps the row before the attempt, and catches per
+account. Copy `NpcGrowthModel::run()`.
+
+### 1. Upkeep — the one that is not optional
+
+**Nothing else should be built before this.** `Game\Starvation` skips owners
+with `id <= 2`, which is the Natars, Support and Multihunter. **Neighbours are
+not skipped**: an NPC whose crop reaches zero has its garrison eaten, exactly
+like a player's.
+
+Today this is survivable by accident rather than by design.
+`NpcBalance::cropCap()` caps a village's army at `maxcrop * 1.2`, and granary
+level tracks field level closely enough that net crop stays positive on a
+freshly grown world — the seeded local world runs between +1400 and +11000 crop
+an hour. It stops being survivable the first time a player raids one flat, or
+an account loses the villages that were feeding the rest.
+
+The pass keeps a crop floor per village. `NpcBalance` already documents the
+figure it assumes: *a quarter of the granary every ten minutes*, which is what
+`ARMY_PER_MAXCROP` was derived from. Do not invent a second number.
+
+### 2. Raids
+
+Every decision this needs already exists and is covered by tests:
+
+| Question | Answer |
+| --- | --- |
+| Is it time? | `NpcTargeting::isReady()`, `NpcClock::nextAttack()` |
+| Awake? | `NpcClock::isAsleep()`, `wakeAt()` |
+| Who? | `NpcTargeting::candidates()`, `pickTarget()`, `softest()` |
+| Worth it? | `NpcDefenceEstimate::availableLoot()`, `cranny()` |
+| Survivable? | `NpcDefenceEstimate::defence()`, `hasSuperiority()` |
+| With what? | `NpcArmyRoles::raidWave()`, `scoutParty()` |
+| Real attack? | `NpcRealAttackPolicy::allows()`, `refusal()` |
+| Come back to it? | `NpcFarmList::pick()`, `shouldBurn()`, `burnUntil()` |
+
+The `npc_farm` table is already in `005_npc_players.sql` with every column the
+farm list needs, and `npc_player` carries `next_attack`, `burst`, `last_attack`,
+`grudge_hits`, `grudge_since`, `last_raider`, `raid_loot` and `raid_hits`.
+
+Three things to get right, because none of them is obvious:
+
+- **Send with `MovementsModel::addMovementWithSourceMutation()`**, never
+  `addMovement()`. It takes a `callable $sourceMutation` and puts the troop
+  deduction and the movement row in one transaction. `addMovement()` alone
+  creates an army that is in two places at once.
+- **Convert the wave with `NpcTroopMapping::toAttackSlots()`.** The brains
+  answer in tribe-relative slots; the movement row wants eleven ordered values.
+- **Loot has to come back into `npc_player.raid_loot`**, or `NpcBalance::
+  lootBonus()` never lifts a raider's ceiling and the whole farm-king arc does
+  nothing. The battle result is the only place that number exists.
+
+### 3. Alliances
+
+`NpcAlliances` (357 lines, tested) plans blocs, confederations, wars and which
+alliance may raid which. Nothing writes `alidata` or `users.aid` yet. It is
+worth doing after raids, because `mayRaid()` and `friendly()` only mean
+something once there are raids to refuse.
+
+### 4. Admin panel
+
+There is none, and `npc.php` covers the operational need. A panel is only worth
+it once an administrator has a reason to change one account rather than the
+world — which is really a reason to want per-account overrides, and those do
+not exist either.
+
+## Known gaps in what IS implemented
+
+- **Building dependencies are not checked.** `NpcBuildOrder` walks goals in a
+  sensible order and `BuildingAction::upgrade()` does not validate prerequisites,
+  so an NPC village can in principle hold a building whose requirements it does
+  not meet. Not observed in practice, because the order puts the main building
+  and rally point early. A player who conquers such a village inherits it.
+- **Research is never done, and the training pass does not care.** `tdata` stays
+  at its defaults, and nothing consults it: a neighbour queues units it has not
+  researched, because `addTraining()` is given the row directly and the engine
+  only validates in the controller. This is the established pattern rather than
+  an oversight - `Core\AI::SKIP_RESEARCH` is `TRUE` and the fake users have
+  always done the same - but it is worth knowing before anyone reads an NPC's
+  army as evidence of what it researched.
+- **Weapon and armour upgrades are never researched.** The smithy BUILDING is in
+  every build order, but the `smithy` table's `u1..u10` levels stay at 0, so NPC
+  troops always fight unupgraded. A player reading a combat report will see it.
+- **Great barracks and great stable are never built.** No build order lists gids
+  29 or 30, so the mapping `NpcGrowthModel::trainableSlots()` keeps for them is
+  dead code until one does.
+- **A conquered neighbour keeps its registry row.** Correct - the villages are
+  derived from `vdata.owner` - but an account down to zero villages is fetched
+  by every batch and skipped. Harmless, and cheap to fix when it matters.
+
+## Test coverage
 
 `tests/npc-*.php` cover the decision layer and need no world at all, so
 `scripts/test-npc.sh` runs them in seconds. The execution layer is covered by

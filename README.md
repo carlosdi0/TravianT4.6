@@ -53,6 +53,7 @@ login, and authenticated gameplay routes.
 - [Supported ruleset](docs/RULESET.md)
 - [Ruleset parity matrix](docs/PARITY.md)
 - [Operations](docs/OPERATIONS.md)
+- [Server-run neighbours](docs/NPC.md)
 - [Privacy](docs/PRIVACY.md)
 - [Release readiness](docs/RELEASE.md)
 - [Upstream synchronization](docs/UPSTREAM.md)

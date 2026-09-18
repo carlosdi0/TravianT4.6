@@ -11,6 +11,8 @@ use Model\FakeUserModel;
 use Model\inactiveModel;
 use Model\MedalsModel;
 use Model\NatarsModel;
+use Model\NpcExpandModel;
+use Model\NpcGrowthModel;
 
 class Launcher
 {
@@ -204,6 +206,19 @@ class Launcher
         {
             $job = [$natarsModel, 'handleNatarExpansion'];
             $jobs[] = new Job('AIProgress:handleNatarExpansion', 15, $job);
+        }
+        // Server-run neighbours. The job interval is how often a BATCH is
+        // considered; how often one account acts is npc.growthInterval, which
+        // the model applies per row. Keeping the two apart is what lets a
+        // world with hundreds of neighbours stay as cheap per tick as one
+        // with ten. See docs/NPC.md.
+        {
+            $job = [new NpcGrowthModel(), 'run'];
+            $jobs[] = new Job('AIProgress:npcGrowth', 30, $job);
+        }
+        {
+            $job = [new NpcExpandModel(), 'run'];
+            $jobs[] = new Job('AIProgress:npcExpand', 120, $job);
         }
         new Job('AIProgress', 5, $jobs, TRUE);
     }

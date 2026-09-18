@@ -186,6 +186,9 @@ durable global outbox remains at-least-once by design.
 - [ ] Alternative queues, services, or language migrations after parity tests
       protect behavior.
 - [ ] Custom events, seasons, automation, and non-compatibility game modes.
+- [ ] Server-run neighbours so a private world has somebody to play against.
+      Decision layer and schema are in place; seeding, execution and
+      scheduling are not. See [NPC design](../docs/NPC.md).
 
 ## Milestones
 

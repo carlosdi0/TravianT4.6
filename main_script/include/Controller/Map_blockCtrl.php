@@ -346,7 +346,10 @@ class Map_blockCtrl extends AnyCtrl
 
     private function getImgResource()
     {
-        if (!is_resource($this->imgResource)) {
+        // PHP 8 returns GdImage objects instead of resources, so is_resource()
+        // is always false here: every call used to hand back a blank canvas and
+        // the rendered map was silently discarded.
+        if (!($this->imgResource instanceof \GdImage)) {
             $this->imgResource = imagecreatetransparent(600, 600);
         }
         return $this->imgResource;
@@ -375,7 +378,7 @@ class Map_blockCtrl extends AnyCtrl
 
     private function getDarkColorResource()
     {
-        if (!is_resource($this->darkColor)) {
+        if (!($this->darkColor instanceof \GdImage)) {
             $this->darkColor = imagecreate($this->getTileSize(), $this->getTileSize());
             imagefill($this->darkColor, 0, 0, imagecolorallocate($this->darkColor, 155, 165, 157));
         }
